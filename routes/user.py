@@ -139,3 +139,23 @@ def delete_account():
     return jsonify({
         'message': 'Account deleted successfully'
     }), 200
+
+@user_bp.route('/challenges', methods=['GET'])
+def get_challenges():
+    user_model = User()
+    challenges = user_model.get_active_challenges()
+    return jsonify({'challenges': challenges}), 200
+
+@user_bp.route('/challenges/join', methods=['POST'])
+@jwt_required()
+def join_challenge():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+    challenge_id = data.get('challenge_id')
+    if not challenge_id:
+        return jsonify({'error': 'challenge_id required'}), 400
+    user_model = User()
+    success = user_model.join_challenge(user_id, challenge_id)
+    if success:
+        return jsonify({'message': 'Joined challenge'}), 200
+    return jsonify({'error': 'Already joined or invalid'}), 400
