@@ -19,7 +19,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # Таблица users (добавлено поле points)
+        # Пользователи
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +37,31 @@ class Database:
             )
         ''')
 
-        # Таблица логов экранного времени
+        # Достижения
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS achievements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                achievement_name TEXT NOT NULL,
+                unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                UNIQUE(user_id, achievement_name)
+            )
+        ''')
+
+        # История ручного ввода экранного времени (кнопка Calculate)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS screen_time_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                hours REAL NOT NULL,
+                days INTEGER NOT NULL,
+                recorded_at DATE DEFAULT CURRENT_DATE,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        ''')
+
+        # Логи загруженных скриншотов и распознанного времени
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS screen_time_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,19 +75,7 @@ class Database:
             )
         ''')
 
-        # Таблица достижений
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS achievements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                achievement_name TEXT NOT NULL,
-                unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-                UNIQUE(user_id, achievement_name)
-            )
-        ''')
-
-        # Таблица челленджей
+        # Челленджи
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS challenges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +90,7 @@ class Database:
             )
         ''')
 
-        # Таблица участия в челленджах
+        # Участие в челленджах
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_challenges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +105,7 @@ class Database:
             )
         ''')
 
-        # Таблица истории очков
+        # Лог начисления очков
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS points_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,7 +149,7 @@ class User:
             )
             conn.commit()
             user_id = cursor.lastrowid
-            # Добавляем первое достижение
+            # Первое достижение
             cursor.execute(
                 'INSERT INTO achievements (user_id, achievement_name) VALUES (?, ?)',
                 (user_id, 'First Day')
@@ -196,9 +208,11 @@ class User:
     def update_streak(self, user_id, streak):
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('UPDATE users SET streak = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (streak, user_id))
+        cursor.execute(
+            'UPDATE users SET streak = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            (streak, user_id)
+        )
         conn.commit()
-        # Проверяем достижения
         if streak >= 7:
             self.add_achievement(user_id, 'Week Hero')
         if streak >= 30:
@@ -234,6 +248,7 @@ class User:
         conn.close()
         return achievements
 
+    # ----- Ручной ввод экранного времени (старый калькулятор) -----
     def save_screen_time(self, user_id, hours, days):
         conn = self.db.get_connection()
         cursor = conn.cursor()
@@ -255,7 +270,7 @@ class User:
         conn.close()
         return history
 
-    # ----- Новые методы для отчётов и лидерборда -----
+    # ----- Отчёты со скриншотами -----
     def save_screen_time_log(self, user_id, image_path, recognized_minutes, reported_date):
         conn = self.db.get_connection()
         cursor = conn.cursor()
@@ -279,11 +294,18 @@ class User:
         conn.close()
         return logs
 
+    # ----- Очки -----
     def update_points(self, user_id, points_delta, reason=''):
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('UPDATE users SET points = points + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (points_delta, user_id))
-        cursor.execute('INSERT INTO points_log (user_id, amount, reason) VALUES (?, ?, ?)', (user_id, points_delta, reason))
+        cursor.execute(
+            'UPDATE users SET points = points + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            (points_delta, user_id)
+        )
+        cursor.execute(
+            'INSERT INTO points_log (user_id, amount, reason) VALUES (?, ?, ?)',
+            (user_id, points_delta, reason)
+        )
         conn.commit()
         conn.close()
 
@@ -295,6 +317,7 @@ class User:
         conn.close()
         return row['points'] if row else 0
 
+    # ----- Челленджи -----
     def get_active_challenges(self):
         conn = self.db.get_connection()
         cursor = conn.cursor()
@@ -320,7 +343,10 @@ class User:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute('INSERT INTO user_challenges (user_id, challenge_id) VALUES (?, ?)', (user_id, challenge_id))
+            cursor.execute(
+                'INSERT INTO user_challenges (user_id, challenge_id) VALUES (?, ?)',
+                (user_id, challenge_id)
+            )
             conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -331,21 +357,31 @@ class User:
     def update_challenge_progress(self, user_id, challenge_id, progress):
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('UPDATE user_challenges SET progress = ? WHERE user_id = ? AND challenge_id = ?', (progress, user_id, challenge_id))
+        cursor.execute(
+            'UPDATE user_challenges SET progress = ? WHERE user_id = ? AND challenge_id = ?',
+            (progress, user_id, challenge_id)
+        )
         conn.commit()
         conn.close()
 
     def complete_challenge(self, user_id, challenge_id):
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('UPDATE user_challenges SET completed = 1, completed_at = CURRENT_DATE WHERE user_id = ? AND challenge_id = ?', (user_id, challenge_id))
+        cursor.execute(
+            'UPDATE user_challenges SET completed = 1, completed_at = CURRENT_DATE WHERE user_id = ? AND challenge_id = ?',
+            (user_id, challenge_id)
+        )
         conn.commit()
         conn.close()
 
+    # ----- Лидерборд -----
     def get_leaderboard(self, limit=50):
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT id, name, points FROM users ORDER BY points DESC LIMIT ?', (limit,))
+        cursor.execute(
+            'SELECT id, name, points FROM users ORDER BY points DESC LIMIT ?',
+            (limit,)
+        )
         leaders = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return leaders
