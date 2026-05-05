@@ -1,7 +1,7 @@
 # routes/report.py
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import User, Database
+from models import User
 from utils.ocr import extract_screen_time
 import os
 from datetime import date
@@ -14,6 +14,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 @report_bp.route('/screen-time', methods=['POST'])
 @jwt_required()
 def report_screen_time():
+    """Загрузка скриншота экранного времени, распознавание и начисление очков"""
     user_id = int(get_jwt_identity())
     if 'screenshot' not in request.files:
         return jsonify({'error': 'No screenshot provided'}), 400
@@ -26,36 +27,39 @@ def report_screen_time():
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
 
-    # OCR
+    # Распознавание текста (OCR)
     with open(filepath, 'rb') as f:
         img_bytes = f.read()
     minutes = extract_screen_time(img_bytes)
 
+    if minutes <= 0:
+        return jsonify({'error': 'Could not recognize screen time. Please try with a clearer screenshot.'}), 422
+
     user_model = User()
+    # Сохраняем запись в лог
     log_id = user_model.save_screen_time_log(user_id, filepath, minutes, date.today())
 
-    # Начисление очков за верификацию
-    if minutes > 0:
-        # Цель: сравнить с предыдущим днём (упрощённо: за загрузку скриншота даём 10 очков + бонус за снижение)
-        previous_logs = user_model.get_screen_time_logs(user_id)
-        bonus = 0
-        if len(previous_logs) > 1:
-            yesterday = previous_logs[1]['recognized_minutes']  # предыдущий день
-            if minutes < yesterday:
-                bonus = 15  # бонус за снижение
-        user_model.update_points(user_id, 10 + bonus, f'Отчёт экранного времени за {date.today()}')
-    else:
-        return jsonify({'error': 'Could not recognize screen time. Please try with a clearer screenshot.'}), 422
+    # Начисление очков (базовые + бонус за снижение)
+    previous_logs = user_model.get_screen_time_logs(user_id)
+    bonus = 0
+    if len(previous_logs) > 1:
+        yesterday = previous_logs[1]['recognized_minutes']  # предыдущий день
+        if minutes < yesterday:
+            bonus = 15  # бонус за снижение
+    total_points = 10 + bonus
+    user_model.update_points(user_id, total_points, f'Отчёт экранного времени за {date.today()}')
 
     return jsonify({
         'message': 'Screen time reported',
         'recognized_minutes': minutes,
-        'log_id': log_id
+        'log_id': log_id,
+        'points_earned': total_points
     }), 201
 
 @report_bp.route('/screen-time/history', methods=['GET'])
 @jwt_required()
 def get_screen_time_history():
+    """История отчётов пользователя"""
     user_id = int(get_jwt_identity())
     user_model = User()
     logs = user_model.get_screen_time_logs(user_id)
@@ -63,6 +67,7 @@ def get_screen_time_history():
 
 @report_bp.route('/leaderboard', methods=['GET'])
 def leaderboard():
+    """Общий рейтинг по очкам"""
     user_model = User()
     leaders = user_model.get_leaderboard()
     return jsonify({'leaders': leaders}), 200
