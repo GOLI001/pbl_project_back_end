@@ -169,6 +169,17 @@ def create_app():
     app.register_blueprint(user_bp, url_prefix='/api/user')
     app.register_blueprint(report_bp, url_prefix='/api/report')
 
+    @app.route('/api/debug/users')
+    def debug_users():
+        import sqlite3
+        conn = sqlite3.connect('users.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, name, email, points, streak FROM users')
+        users = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(users)
+
     # Health check
     @app.route('/api/health')
     def health():
