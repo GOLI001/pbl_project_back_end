@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token
 from flask_restx import Api, Resource, fields
 from config import Config
 from models import User
@@ -77,7 +77,6 @@ def create_app():
                 return {'error': 'Password min 6 characters'}, 400
             user = User().create_user(email, password, name)
             if user:
-                from flask_jwt_extended import create_access_token
                 token = create_access_token(identity=str(user['id']))
                 return {
                     'message': 'Created',
@@ -97,7 +96,6 @@ def create_app():
                 return {'error': 'Email and password required'}, 400
             user = User().authenticate(email, password)
             if user:
-                from flask_jwt_extended import create_access_token
                 token = create_access_token(identity=str(user['id']))
                 return {
                     'message': 'Success',
@@ -108,170 +106,133 @@ def create_app():
 
     # ---------- User Namespace ----------
     user_ns = api.namespace('user', description='User')
+
     @user_ns.route('/profile')
     class Profile(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         def get(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def get_profile():
-                user = User().get_user_by_id(int(get_jwt_identity()))
-                return jsonify({'user': user}) if user else (jsonify({'error': 'Not found'}), 404)
-            return get_profile()
+            user = User().get_user_by_id(int(get_jwt_identity()))
+            if user:
+                return {'user': user}, 200
+            return {'error': 'Not found'}, 404
 
     @user_ns.route('/streak')
     class Streak(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(streak_model)
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def update():
-                user = User().update_streak(int(get_jwt_identity()), request.get_json().get('streak', 0))
-                return jsonify({'streak': user['streak']}) if user else (jsonify({'error': 'Not found'}), 404)
-            return update()
+            user = User().update_streak(int(get_jwt_identity()), request.get_json().get('streak', 0))
+            if user:
+                return {'streak': user['streak']}, 200
+            return {'error': 'Not found'}, 404
 
     @user_ns.route('/screen-time')
     class ScreenTime(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(screen_time_model)
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def save():
-                user_id = int(get_jwt_identity())
-                data = request.get_json()
-                u = User()
-                u.save_screen_time(user_id, data.get('hours', 0), data.get('days', 7))
-                u.update_user(user_id, {'screen_time_hours': data['hours'], 'screen_time_days': data['days']})
-                return {'message': 'Saved'}
-            return save()
+            data = request.get_json()
+            user_id = int(get_jwt_identity())
+            u = User()
+            u.save_screen_time(user_id, data.get('hours', 0), data.get('days', 7))
+            u.update_user(user_id, {'screen_time_hours': data['hours'], 'screen_time_days': data['days']})
+            return {'message': 'Saved'}, 200
 
     @user_ns.route('/screen-time/history')
     class ScreenTimeHistory(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         def get(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def history():
-                return jsonify({'history': User().get_screen_time_history(int(get_jwt_identity()))})
-            return history()
+            history = User().get_screen_time_history(int(get_jwt_identity()))
+            return {'history': history}, 200
 
     @user_ns.route('/achievements')
     class Achievements(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         def get(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def ach():
-                return jsonify({'achievements': User().get_user_achievements(int(get_jwt_identity()))})
-            return ach()
+            achievements = User().get_user_achievements(int(get_jwt_identity()))
+            return {'achievements': achievements}, 200
 
     @user_ns.route('/points')
     class Points(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         def get(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def get_pts():
-                return {'points': User().get_points(int(get_jwt_identity()))}
-            return get_pts()
+            pts = User().get_points(int(get_jwt_identity()))
+            return {'points': pts}, 200
 
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(points_model)
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def update_pts():
-                user_id = int(get_jwt_identity())
-                new_points = request.get_json().get('points', 0)
-                u = User()
-                cur = u.get_points(user_id)
-                delta = new_points - cur
-                if delta != 0:
-                    u.update_points(user_id, delta, 'sync_from_client')
-                return {'points': u.get_points(user_id)}
-            return update_pts()
+            user_id = int(get_jwt_identity())
+            new_points = request.get_json().get('points', 0)
+            u = User()
+            cur = u.get_points(user_id)
+            delta = new_points - cur
+            if delta != 0:
+                u.update_points(user_id, delta, 'sync_from_client')
+            return {'points': u.get_points(user_id)}, 200
 
     @user_ns.route('/leaderboard')
     class Leaderboard(Resource):
         def get(self):
-            return jsonify({'leaders': User().get_leaderboard()})
+            return {'leaders': User().get_leaderboard()}, 200
 
     @user_ns.route('/challenges')
     class Challenges(Resource):
         def get(self):
-            return jsonify({'challenges': User().get_active_challenges()})
+            return {'challenges': User().get_active_challenges()}, 200
 
     @user_ns.route('/challenges/join')
     class JoinChallenge(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(challenge_join)
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def join():
-                ok = User().join_challenge(int(get_jwt_identity()), request.get_json().get('challenge_id'))
-                return {'message': 'Joined'} if ok else ({'error': 'Already joined'}, 400)
-            return join()
+            ok = User().join_challenge(int(get_jwt_identity()), request.get_json().get('challenge_id'))
+            if ok:
+                return {'message': 'Joined'}, 200
+            return {'error': 'Already joined'}, 400
 
     @user_ns.route('/challenges/progress')
     class ChallengeProgress(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(challenge_progress)
         def put(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def update():
-                d = request.get_json()
-                User().update_challenge_progress(int(get_jwt_identity()), d['challenge_id'], d['progress'])
-                return {'message': 'Progress updated'}
-            return update()
+            d = request.get_json()
+            User().update_challenge_progress(int(get_jwt_identity()), d['challenge_id'], d['progress'])
+            return {'message': 'Progress updated'}, 200
 
     @user_ns.route('/challenges/complete')
     class CompleteChallenge(Resource):
-        @user_ns.doc(security='Bearer')
+        @jwt_required()
         @user_ns.expect(challenge_join)
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def complete():
-                User().complete_challenge(int(get_jwt_identity()), request.get_json().get('challenge_id'))
-                return {'message': 'Completed'}
-            return complete()
+            User().complete_challenge(int(get_jwt_identity()), request.get_json().get('challenge_id'))
+            return {'message': 'Completed'}, 200
 
     # ---------- Report Namespace (OCR) ----------
     report_ns = api.namespace('report', description='Reports')
     @report_ns.route('/screen-time')
     class ReportScreenTime(Resource):
-        @report_ns.doc(security='Bearer')
+        @jwt_required()
         def post(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
             from routes.report import report_screen_time
-            @jwt_required()
-            def report():
-                return report_screen_time()
-            return report()
+            return report_screen_time()
 
     @report_ns.route('/screen-time/history')
     class ReportHistory(Resource):
-        @report_ns.doc(security='Bearer')
+        @jwt_required()
         def get(self):
-            from flask_jwt_extended import jwt_required, get_jwt_identity
-            @jwt_required()
-            def hist():
-                return jsonify({'logs': User().get_screen_time_logs(int(get_jwt_identity()))})
-            return hist()
+            logs = User().get_screen_time_logs(int(get_jwt_identity()))
+            return {'logs': logs}, 200
 
     @report_ns.route('/leaderboard')
     class ReportLeaderboard(Resource):
         def get(self):
-            return jsonify({'leaders': User().get_leaderboard()})
+            return {'leaders': User().get_leaderboard()}, 200
 
     # ---------- Health ----------
     @app.route('/api/health')
     def health():
-        return {'status': 'ok'}
+        return {'status': 'ok'}, 200
 
     return app
 
